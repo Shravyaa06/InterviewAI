@@ -1,0 +1,11 @@
+fastapi>=0.68.0
+uvicorn>=0.15.0
+websockets>=10.0
+httpx>=0.23.0
+python-multipart
+numpy
+soundfile
+gTTS
+openai-whisper
+pyngrok
+nest_asyncio

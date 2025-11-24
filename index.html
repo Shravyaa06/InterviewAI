@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Interviewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link
+      href="https://fonts.googleapis.com/icon?family=Material+Icons"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #121212;
+        color: #e0e0e0;
+        overflow: hidden;
+      }
+
+      .screen {
+        display: none;
+        height: 100vh;
+        flex-direction: column;
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+      }
+
+      .active {
+        display: flex;
+        opacity: 1;
+      }
+
+      .pulse-ring {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        animation: pulse 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(0.95);
+          box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+        }
+
+        70% {
+          transform: scale(1);
+          box-shadow: 0 0 0 20px rgba(59, 130, 246, 0);
+        }
+
+        100% {
+          transform: scale(0.95);
+          box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+        }
+      }
+
+      .talking {
+        animation: speak 0.5s infinite alternate;
+      }
+
+      @keyframes speak {
+        from {
+          transform: scale(1);
+          filter: brightness(1);
+        }
+
+        to {
+          transform: scale(1.05);
+          filter: brightness(1.2);
+        }
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #1e1e1e;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #333;
+        border-radius: 4px;
+      }
+
+      .loading-spinner {
+        border: 4px solid rgba(255, 255, 255, 0.08);
+        border-top: 4px solid #4f9cff;
+        border-radius: 50%;
+        width: 54px;
+        height: 54px;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- LOADING SCREEN FOR FINAL REVIEW (new) -->
+    <div
+      id="screen-loading"
+      class="screen items-center justify-center bg-black"
+    >
+      <div class="flex flex-col items-center gap-6">
+        <div class="loading-spinner"></div>
+        <h2 class="text-xl text-gray-300">Generating performance review...</h2>
+        <p class="text-sm text-gray-400">
+          This may take a few seconds — preparing your detailed feedback.
+        </p>
+      </div>
+    </div>
+
+    <!-- SCREEN 1: LOBBY -->
+    <div
+      id="screen-lobby"
+      class="screen active items-center justify-center bg-gradient-to-br from-gray-900 to-black"
+    >
+      <div
+        class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-96 border border-gray-700"
+      >
+        <h1 class="text-2xl font-bold mb-2 text-center text-white">
+          Interview Setup
+        </h1>
+        <div class="space-y-4 mt-6">
+          <input
+            type="text"
+            id="role"
+            class="w-full bg-gray-700 border border-gray-600 p-3 rounded-lg text-white"
+            placeholder="Target Role (e.g. Dev)"
+          />
+          <select
+            id="level"
+            class="w-full bg-gray-700 border border-gray-600 p-3 rounded-lg text-white"
+          >
+            <option value="Junior">Junior</option>
+            <option value="Senior">Senior</option>
+            <option value="Manager">Manager</option>
+          </select>
+        </div>
+        <button
+          onclick="startInterview()"
+          class="w-full mt-8 bg-blue-600 hover:bg-blue-500 text-white font-bold p-3 rounded-lg"
+        >
+          Start
+        </button>
+      </div>
+    </div>
+
+    <!-- SCREEN 2: MEETING ROOM (keeps original features, adds right-side editor) -->
+    <div id="screen-meeting" class="screen relative bg-gray-900">
+      <div
+        class="absolute top-0 w-full p-4 flex justify-between items-center z-10 bg-black/50"
+      >
+        <span class="text-sm font-medium text-gray-300" id="display-role"
+          >...</span
+        >
+        <select
+          id="persona-select"
+          onchange="changePersona()"
+          class="bg-gray-800 text-xs py-1 px-3 rounded-full border border-gray-600"
+        >
+          <option value="normal">Normal</option>
+          <option value="strict">Strict</option>
+          <option value="friendly">Friendly</option>
+        </select>
+      </div>
+
+      <!-- Layout: left = avatar + transcript (original), right = optional tech editor (new) -->
+      <div class="flex-1 flex flex-row items-stretch">
+        <div class="flex-1 flex flex-col items-center justify-center relative">
+          <div class="relative w-48 h-48 flex items-center justify-center mb-8">
+            <div id="avatar-ring" class="pulse-ring hidden"></div>
+            <div
+              id="avatar-img"
+              class="w-44 h-44 rounded-full bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center shadow-xl z-10 relative"
+            >
+              <span class="material-icons text-7xl text-white/90"
+                >smart_toy</span
+              >
+            </div>
+          </div>
+          <div
+            id="status-text"
+            class="text-gray-400 font-mono text-sm h-6 mb-4"
+          >
+            Initializing...
+          </div>
+          <div
+            id="transcript-box"
+            class="w-full max-w-2xl h-48 overflow-y-auto px-6 py-4 text-center space-y-3"
+          ></div>
+        </div>
+
+        <!-- Tech editor panel (hidden by default, shown only for tech roles) -->
+        <div
+          id="tech-editor"
+          class="w-[40%] h-full bg-gray-800 border-l border-gray-700 hidden flex-col p-4"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-bold">Code Editor (Tech roles)</h2>
+            <select
+              id="editor-mode"
+              class="bg-gray-700 text-xs py-1 px-2 rounded border border-gray-600"
+            >
+              <option value="python">Python</option>
+              <option value="sql">SQL</option>
+              <option value="markdown">Markdown</option>
+            </select>
+          </div>
+          <textarea
+            id="code-box"
+            class="w-full h-[70%] bg-gray-900 text-white p-4 rounded-lg font-mono border border-gray-700"
+            placeholder="Write code, algorithm notes or explain your solution here..."
+          ></textarea>
+          <div class="mt-2 flex gap-2">
+            <button
+              onclick="sendCodeSnippet()"
+              class="px-4 py-2 bg-blue-600 rounded text-white"
+            >
+              Send to AI
+            </button>
+            <button
+              onclick="clearEditor()"
+              class="px-4 py-2 bg-gray-700 rounded text-white"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="p-6 bg-gray-900 border-t border-gray-800 flex justify-center items-center gap-8"
+      >
+        <button
+          id="mic-btn"
+          class="w-14 h-14 rounded-full bg-gray-700 hover:bg-gray-600 text-white shadow-lg transition flex items-center justify-center"
+          onclick="toggleMic()"
+        >
+          <span class="material-icons" id="mic-icon">mic_off</span>
+        </button>
+        <button
+          class="px-6 py-3 rounded-full bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-600/50 transition"
+          onclick="endCall()"
+        >
+          End
+        </button>
+      </div>
+    </div>
+
+    <!-- SCREEN 3: FEEDBACK -->
+    <div
+      id="screen-feedback"
+      class="screen items-center justify-center bg-black"
+    >
+      <div
+        class="w-full max-w-4xl h-[90vh] flex flex-col bg-gray-900 rounded-xl p-8"
+      >
+        <h1 class="text-3xl font-bold text-white mb-4">Review</h1>
+        <div id="score-display" class="text-5xl font-bold text-green-400 mb-6">
+          --
+        </div>
+        <div
+          id="feedback-content"
+          class="prose prose-invert text-gray-300 overflow-y-auto flex-1"
+        ></div>
+        <button
+          onclick="location.reload()"
+          class="mt-4 bg-gray-700 text-white font-bold p-4 rounded-lg w-full"
+        >
+          Restart
+        </button>
+      </div>
+    </div>
+
+    <script>
+      /* ============================================================
+     HYBRID REALTIME CROSSFADE AUDIO PIPELINE (120 ms overlap)
+     ============================================================ */
+      let activeSources = [];
+      let ws,
+        mediaRecorder,
+        audioChunks = [];
+      let isMicOn = false;
+      let isPlaying = false;
+
+      // Web Audio API objects
+      let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      let lastTailBuffer = null;
+
+      // Queues
+      let audioStreamQueue = []; // For streaming chunks
+      let legacyQueue = []; // For old single "audio" messages
+
+      // --- CONFIGURATION ---
+      const PLAYBACK_SPEED = 1; // Global speed control (0.75x)
+
+      function forceStopAllAudio() {
+        try {
+          activeSources.forEach((src) => {
+            try {
+              src.stop(0);
+            } catch (e) {}
+          });
+          activeSources = [];
+        } catch (e) {}
+
+        try {
+          audioCtx.close();
+        } catch (e) {}
+
+        // Rebuild fresh audio context after closing
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      /* ------------------------------------------------------------
+     Utility: Decode base64 WAV → AudioBuffer
+     ------------------------------------------------------------ */
+      async function decodeWav(base64Str) {
+        const raw = atob(base64Str);
+        const buf = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+        const audioData = buf.buffer;
+        return await audioCtx.decodeAudioData(audioData.slice(0));
+      }
+
+      /* ------------------------------------------------------------
+     Play a WAV segment with optional crossfade
+     ------------------------------------------------------------ */
+      async function playSegment(mainB64, headB64, tailB64, index, isLast) {
+        try {
+          const mainBuf = mainB64 ? await decodeWav(mainB64) : null;
+          const headBuf = headB64 ? await decodeWav(headB64) : null;
+          const tailBuf = tailB64 ? await decodeWav(tailB64) : null;
+
+          // If we have previous tail & current head => crossfade
+          if (lastTailBuffer && headBuf) {
+            const fadeDuration = 0.12; // 120 ms wall-clock time for the fade
+
+            const now = audioCtx.currentTime;
+
+            // Play last tail
+            const tailSrc = audioCtx.createBufferSource();
+            tailSrc.buffer = lastTailBuffer;
+            tailSrc.playbackRate.value = PLAYBACK_SPEED; // <--- SLOW DOWN
+
+            const tailGain = audioCtx.createGain();
+            tailGain.gain.setValueAtTime(1, now);
+            tailGain.gain.linearRampToValueAtTime(0, now + fadeDuration);
+
+            tailSrc.connect(tailGain).connect(audioCtx.destination);
+            tailSrc.start(now);
+
+            // Play new head
+            const headSrc = audioCtx.createBufferSource();
+            headSrc.buffer = headBuf;
+            headSrc.playbackRate.value = PLAYBACK_SPEED; // <--- SLOW DOWN
+
+            const headGain = audioCtx.createGain();
+            headGain.gain.setValueAtTime(0, now);
+            headGain.gain.linearRampToValueAtTime(1, now + fadeDuration);
+
+            headSrc.connect(headGain).connect(audioCtx.destination);
+            headSrc.start(now);
+
+            // After crossfade, play main audio
+            if (mainBuf) {
+              const mainSrc = audioCtx.createBufferSource();
+              mainSrc.buffer = mainBuf;
+              mainSrc.playbackRate.value = PLAYBACK_SPEED; // <--- SLOW DOWN
+              mainSrc.connect(audioCtx.destination);
+              mainSrc.start(now + fadeDuration);
+            }
+          } else {
+            // No crossfade – start main normally
+            if (mainBuf) {
+              const src = audioCtx.createBufferSource();
+              src.buffer = mainBuf;
+              activeSources.push(src);
+              src.playbackRate.value = PLAYBACK_SPEED; // <--- SLOW DOWN
+              src.connect(audioCtx.destination);
+              src.start();
+            }
+          }
+
+          // Save tail for next segment
+          lastTailBuffer = tailBuf;
+
+          if (isLast) {
+            // Clear after message ends
+            setTimeout(() => {
+              lastTailBuffer = null;
+            }, 500);
+          }
+        } catch (e) {
+          console.error("Audio play error:", e);
+        }
+      }
+
+      /* ------------------------------------------------------------
+     Process streaming packets
+     ------------------------------------------------------------ */
+      async function processStreamQueue() {
+        if (isPlaying || audioStreamQueue.length === 0) return;
+        isPlaying = true;
+        resetMic();
+
+        const avatar = document.getElementById("avatar-img");
+        const ring = document.getElementById("avatar-ring");
+        avatar.classList.add("talking");
+        ring.classList.remove("hidden");
+        setStatus("Interviewer speaking...");
+
+        while (audioStreamQueue.length > 0) {
+          const pkt = audioStreamQueue.shift();
+          await playSegment(
+            pkt.main,
+            pkt.head,
+            pkt.tail,
+            pkt.index,
+            pkt.isLast
+          );
+
+          // Slight spacing to avoid blocking
+          await new Promise((res) => setTimeout(res, 20));
+        }
+
+        // When queue finishes
+        setTimeout(() => {
+          isPlaying = false;
+          lastTailBuffer = null;
+          const avatar = document.getElementById("avatar-img");
+          const ring = document.getElementById("avatar-ring");
+          avatar.classList.remove("talking");
+          ring.classList.add("hidden");
+          setStatus("Waiting for response...");
+        }, 200);
+      }
+
+      /* ------------------------------------------------------------
+     Legacy single-audio processing
+     ------------------------------------------------------------ */
+      function processLegacyQueue() {
+        if (isPlaying || legacyQueue.length === 0) return;
+        isPlaying = true;
+
+        const avatar = document.getElementById("avatar-img");
+        const ring = document.getElementById("avatar-ring");
+        avatar.classList.add("talking");
+        ring.classList.remove("hidden");
+        setStatus("Interviewer speaking...");
+
+        const audio = new Audio("data:audio/wav;base64," + legacyQueue.shift());
+        audio.playbackRate = PLAYBACK_SPEED; // <--- SLOW DOWN (Preserves pitch)
+
+        audio.onended = () => {
+          isPlaying = false;
+          if (legacyQueue.length === 0) {
+            avatar.classList.remove("talking");
+            ring.classList.add("hidden");
+            setStatus("Waiting for response...");
+          }
+          processLegacyQueue();
+        };
+
+        audio.play().catch(() => {
+          isPlaying = false;
+          processLegacyQueue();
+        });
+      }
+
+      /* ------------------------------------------------------------
+     UI Navigation / WebSocket Handling
+     ------------------------------------------------------------ */
+      function showScreen(id) {
+        document.querySelectorAll(".screen").forEach((s) => {
+          s.classList.remove("active");
+          if (s.id !== id) setTimeout(() => (s.style.display = "none"), 500);
+        });
+        const el = document.getElementById(id);
+        el.style.display = "flex";
+        setTimeout(() => el.classList.add("active"), 10);
+      }
+
+      function showLoading() {
+        showScreen("screen-loading");
+      }
+
+      function startInterview() {
+        const role = document.getElementById("role").value || "General";
+        const level = document.getElementById("level").value;
+        document.getElementById("display-role").innerText = `${level} ${role}`;
+
+        // Show tech editor for tech roles (non-destructive - original features preserved)
+        const roleLower = role.toLowerCase();
+        const techKeywords = [
+          "developer",
+          "engineer",
+          "programmer",
+          "data",
+          "ml",
+          "ai",
+          "software",
+          "scientist",
+          "sde",
+          "backend",
+          "frontend",
+        ];
+        if (techKeywords.some((k) => roleLower.includes(k))) {
+          const editor = document.getElementById("tech-editor");
+          if (editor) editor.style.display = "flex";
+        }
+
+        showScreen("screen-meeting");
+
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+
+        ws.onopen = () => {
+          setStatus("Connected.");
+          ws.send(JSON.stringify({ type: "config", role: role, level: level }));
+        };
+
+        ws.onmessage = async (event) => {
+          const data = JSON.parse(event.data);
+
+          if (data.type === "audio") {
+            legacyQueue.push(data.payload);
+            processLegacyQueue();
+          } else if (data.type === "audio_stream") {
+            audioStreamQueue.push(data.payload);
+            processStreamQueue();
+          } else if (data.type === "text") {
+            addTranscript("AI", data.payload);
+          } else if (data.type === "transcript_update") {
+            addTranscript("You", data.payload);
+          }
+
+          // NEW: server tells client that review generation has started -> show loading screen
+          else if (data.type === "start_review") {
+            // Show a loading/please wait screen while we prepare the review
+            showLoading();
+            setStatus("Generating review...");
+          } else if (data.type === "feedback") {
+            showScreen("screen-feedback");
+
+            const md = data.payload.text; // backend should send markdown
+            document.getElementById("feedback-content").innerHTML =
+              marked.parse(md);
+
+            document.getElementById("score-display").innerText =
+              data.payload.score;
+          } else if (data.type === "error") {
+            setStatus("Error: " + data.payload);
+            resetMic();
+          } else if (data.type === "stop_audio") {
+            // STOP EVERY PLAYING SOURCE
+            activeSources.forEach((src) => {
+              try {
+                src.stop(0);
+              } catch (e) {}
+            });
+            activeSources = [];
+
+            // Clear queues
+            legacyQueue = [];
+            audioStreamQueue = [];
+            isPlaying = false;
+            lastTailBuffer = null;
+
+            // Reset audio context
+            try {
+              audioCtx.close();
+            } catch (e) {}
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Stop avatar animation
+            const avatar = document.getElementById("avatar-img");
+            const ring = document.getElementById("avatar-ring");
+            avatar.classList.remove("talking");
+            ring.classList.add("hidden");
+
+            setStatus("Call ended.");
+          } else if (data.type === "stop_loading") {
+            setStatus("Waiting for you...");
+            resetMic();
+          }
+        };
+      }
+
+      /* ------------------------------------------------------------
+     Microphone Recording & Sending
+     ------------------------------------------------------------ */
+      async function toggleMic() {
+        if (!isMicOn) {
+          if (isPlaying) {
+            setStatus("Interviewer is speaking... wait for them to finish.");
+            return;
+          }
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+            });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+              const blob = new Blob(audioChunks, { type: "audio/webm" });
+              const reader = new FileReader();
+              reader.readAsDataURL(blob);
+              reader.onloadend = () => {
+                ws.send(
+                  JSON.stringify({
+                    type: "audio_input",
+                    payload: reader.result.split(",")[1],
+                  })
+                );
+                setStatus("Processing...");
+              };
+            };
+            mediaRecorder.start();
+            isMicOn = true;
+            document
+              .getElementById("mic-btn")
+              .classList.replace("bg-gray-700", "bg-red-600");
+            document.getElementById("mic-icon").innerText = "mic";
+            setStatus("Listening... Click to send.");
+          } catch (e) {
+            alert("Microphone blocked. Please allow mic access.");
+          }
+        } else {
+          mediaRecorder.stop();
+          resetMic();
+        }
+      }
+
+      function resetMic() {
+        isMicOn = false;
+        document
+          .getElementById("mic-btn")
+          .classList.replace("bg-red-600", "bg-gray-700");
+        document.getElementById("mic-icon").innerText = "mic_off";
+      }
+
+      /* ------------------------------------------------------------
+     UI Helpers
+     ------------------------------------------------------------ */
+      function setStatus(text) {
+        document.getElementById("status-text").innerText = text;
+      }
+
+      function addTranscript(speaker, text) {
+        const box = document.getElementById("transcript-box");
+        const align = speaker === "AI" ? "text-left" : "text-right";
+        const color = speaker === "AI" ? "bg-gray-800" : "bg-blue-900";
+        box.innerHTML += `
+        <div class="${align} mb-2">
+            <span class="text-xs text-gray-400">${speaker}</span>
+            <div class="p-2 rounded ${color} text-sm inline-block">${text}</div>
+        </div>`;
+        box.scrollTop = box.scrollHeight;
+      }
+
+      function endCall() {
+        try {
+          ws.send(JSON.stringify({ type: "end_call" }));
+        } catch (e) {}
+
+        // 🛑 STOP EVERYTHING NOW
+        forceStopAllAudio();
+
+        // Clear queues
+        legacyQueue = [];
+        audioStreamQueue = [];
+        isPlaying = false;
+        lastTailBuffer = null;
+
+        // Stop avatar animation
+        const avatar = document.getElementById("avatar-img");
+        const ring = document.getElementById("avatar-ring");
+        avatar.classList.remove("talking");
+        ring.classList.add("hidden");
+
+        setStatus("Call ended.");
+      }
+
+      function changePersona() {
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "persona_change",
+              payload: document.getElementById("persona-select").value,
+            })
+          );
+        } catch (e) {
+          console.warn("WebSocket not open when changing persona");
+        }
+      }
+
+      /* ------------------------------------------------------------
+     Editor helpers (new) - allow tech candidates to send code snippets to server
+     ------------------------------------------------------------ */
+      function sendCodeSnippet() {
+        const code = document.getElementById("code-box").value;
+        const mode = document.getElementById("editor-mode").value;
+        if (!code.trim()) return alert("Editor is empty");
+
+        // send as special message to server; server should handle 'code_snippet' messages
+        try {
+          ws.send(
+            JSON.stringify({ type: "code_snippet", payload: { code, mode } })
+          );
+          setStatus("Code snippet sent.");
+        } catch (e) {
+          alert("Connection closed. Cannot send snippet.");
+        }
+      }
+
+      function clearEditor() {
+        document.getElementById("code-box").value = "";
+      }
+    </script>
+  </body>
+</html>
